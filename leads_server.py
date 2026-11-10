@@ -212,6 +212,8 @@ def update_lead(
     priority: Annotated[Priority, Field(description="Priority: high, medium or low.")],
     status: Annotated[Status, Field(description="New status (default processed).")] = "processed",
     draft_reply: Annotated[Optional[str], Field(description="Draft reply text. Leave empty for spam.")] = None,
+    langfuse_parent_trace_id: Optional[str] = None,
+    langfuse_parent_observation_id: Optional[str] = None,
 ) -> dict:
     """Save the processing result for one lead.
 

@@ -50,6 +50,49 @@ LLM_MODEL = os.environ.get("LLM_MODEL", "deepseek-chat")
 CATEGORIES = ("sale", "complaint", "question", "spam")
 PRIORITIES = ("high", "medium", "low")
 
+# Langfuse tracing: enabled only when LANGFUSE_PUBLIC_KEY is set.
+TRACING = bool(os.environ.get("LANGFUSE_PUBLIC_KEY"))
+
+
+def _make_observe():
+    """Langfuse tracing decorator, or a no-op when tracing is off/unavailable."""
+    if not TRACING:
+        return lambda **kw: (lambda f: f)
+    try:
+        from langfuse.decorators import observe
+        return observe
+    except Exception:
+        return lambda **kw: (lambda f: f)
+
+
+_observe = _make_observe()
+
+
+def _langfuse_ctx():
+    """Return langfuse_context if tracing is on, else None."""
+    if not TRACING:
+        return None
+    try:
+        from langfuse.decorators import langfuse_context
+        return langfuse_context
+    except Exception:
+        return None
+
+
+def _server_env():
+    """Env vars to pass to the MCP server subprocess (for its own Langfuse tracing).
+
+    The MCP stdio client only inherits a "safe" subset of the environment, so we
+    must forward the Langfuse variables explicitly — otherwise the server's
+    @observe decorator is a no-op and its spans never reach Langfuse.
+    """
+    env = {}
+    for k in ("LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY", "LANGFUSE_HOST"):
+        v = os.environ.get(k)
+        if v:
+            env[k] = v
+    return env or None
+
 
 # --------------------------------------------------------------------------- #
 # System prompt (Part 2, B2)
@@ -231,8 +274,53 @@ async def call_tool(session, name: str, args: dict) -> dict:
     return data if isinstance(data, dict) else {"error": text}
 
 
+@_observe()
+async def _process_one(session, lead_id, name, contact, text):
+    """Classify one lead, trace the reasoning, and write the result back.
+
+    This function is one observation (the parent). The `update_lead` tool call
+    below is attached to the SAME trace as a child span via
+    langfuse_parent_trace_id / langfuse_parent_observation_id, so the reasoning
+    and the action form a single parent→child chain in Langfuse.
+    """
+    decision = classify(name, contact, text)
+
+    ctx = _langfuse_ctx()
+    if ctx is not None:
+        try:
+            ctx.update_current_observation(metadata={
+                "reason": decision["reason"],
+                "flags": decision["flags"],
+                "category": decision["category"],
+                "priority": decision["priority"],
+            })
+        except Exception:
+            pass
+
+    args = {
+        "id": lead_id,
+        "category": decision["category"],
+        "priority": decision["priority"],
+        "status": "processed",
+        "draft_reply": decision["draft_reply"],
+    }
+    if ctx is not None:
+        try:
+            trace_id = ctx.get_current_trace_id()
+            observation_id = ctx.get_current_observation_id()
+            if trace_id:
+                args["langfuse_parent_trace_id"] = trace_id
+                if observation_id:
+                    args["langfuse_parent_observation_id"] = observation_id
+        except Exception:
+            pass
+
+    result = await call_tool(session, "update_lead", args)
+    return decision, result
+
+
 async def main() -> int:
-    params = StdioServerParameters(command=SERVER_PYTHON, args=[SERVER_SCRIPT])
+    params = StdioServerParameters(command=SERVER_PYTHON, args=[SERVER_SCRIPT], env=_server_env())
     async with stdio_client(params) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
@@ -261,15 +349,7 @@ async def main() -> int:
                 text = lead.get("text") or ""
                 name = lead.get("name") or ""
 
-                decision = classify(name, contact, text)
-
-                result = await call_tool(session, "update_lead", {
-                    "id": lead_id,
-                    "category": decision["category"],
-                    "priority": decision["priority"],
-                    "status": "processed",
-                    "draft_reply": decision["draft_reply"],
-                })
+                decision, result = await _process_one(session, lead_id, name, contact, text)
                 if "error" in result:
                     errors.append({"id": lead_id, "error": result["error"]})
                     skipped += 1
