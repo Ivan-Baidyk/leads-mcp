@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Runtime / secrets (never commit)
+.env
+logs.json
+actor.json
+.leads-*.tmp
+leads.json.lock
+
+# Agent run artifacts
+agent_run.log
+agent_dialogue.jsonl
+agent_instruction.txt
