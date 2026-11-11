@@ -11,7 +11,7 @@
 | Чат с агентом (целевой чат) | `https://webui.aimentorcrm.com/c/b5c2a7ef-3c19-4e0f-a404-ecedda3968ab` |
 | Трейсы — журнал вызовов (Langfuse) | `https://langfuse.aimentorcrm.com/project/cmwb3wzat0006xqows8f1gha5/traces` |
 | Сервер (по HTTP, с паролем) | `https://certa.aimentorcrm.com/mcp` |
-| Данные — файл с заявками (видно изменения) | `https://certa.aimentorcrm.com/leads.json` |
+| Данные — файл с заявками (видно изменения) | `[https://certa.aimentorcrm.com/leads.json](https://certa.aimentorcrm.com/leads.processed.json)` |
 
 > **Логины, пароли и токены я сюда не выкладываю** — они отправлены отдельно,
 > в тексте-отчёте о задании. В репозитории секретов нет.
